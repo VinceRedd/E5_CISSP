@@ -1,51 +1,27 @@
-# ============================================================
-# LAB CYBER - Docker Compose (VM Kali sous VirtualBox / Windows 10)
-# ------------------------------------------------------------
-# Ce fichier regroupe les différents outils du lab :
-#  - Caldera (C2 / émulation d’attaques)
-#  - Infection Monkey (pentest automatisé)
-#  - Netdata (monitoring)
-#  - Wazuh (SIEM) — externalisé à cause d’une contrainte matérielle
-#  - Dockurr/Windows (VM Windows dans Docker) — non fonctionnel ici
-#
-# ⚠️ Contexte important :
-# 1. Cette VM Kali tourne dans VirtualBox sur un hôte Windows.
-# 2. VirtualBox ne transmet pas les extensions CPU AVX / VT-x aux conteneurs Docker.
-# 3. Conséquences :
-#    - Les conteneurs qui exigent x86-64-v2 (Wazuh, MongoDB 6+) refusent de démarrer.
-#    - Les conteneurs basés sur KVM (/dev/kvm) comme dockurr/windows ne peuvent pas s’exécuter.
-#
-# Ces limitations sont matérielles, pas logicielles : elles viennent de VirtualBox.
-# Le compose est donc correct, mais certaines images nécessitent un environnement
-# de virtualisation plus bas-niveau (Ubuntu natif, WSL2 ou Docker Desktop sur l’hôte).
-# ============================================================
+version: "3.9"
 
 services:
   # ---------- CALDERA ----------
-  # Plateforme d’émulation d’attaques (C2 Framework MITRE).
-  # Interface Web : http://localhost:8888
   caldera:
     image: ghcr.io/mitre/caldera:latest
     container_name: caldera
     restart: unless-stopped
-    ports: ["8888:8888"]
+    ports:
+      - "8888:8888"
     volumes:
       - caldera_data:/caldera/data
     environment:
       - CALDERA_INSECURE=true
 
   # ---------- MongoDB ----------
-  # Utilisé par Infection Monkey (base de données interne).
-  # Mongo 5+ nécessite AVX → on reste sur Mongo 4.4 (compatible VirtualBox).
-  # Mode réseau "host" pour exposer le port local 27017 à Monkey.
   mongo:
     image: mongo:4.4
     platform: linux/amd64
     container_name: mongo
     hostname: mongo
     restart: unless-stopped
-    network_mode: host
-    command: ["mongod", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+    ports:
+      - "27017:27017"
     volumes:
       - monkey-tutorial-db:/data/db
     healthcheck:
@@ -55,36 +31,30 @@ services:
       retries: 12
 
   # ---------- Infection Monkey (Monkey Island) ----------
-  # Serveur de gestion Infection Monkey (C2 local).
-  # Interface Web : https://localhost:5000
-  # Se connecte directement à MongoDB (127.0.0.1:27017)
   monkey-island:
     image: infectionmonkey/monkey-island:e7c59c79d
     container_name: monkey-island
     hostname: monkey-island
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "5000:5000"
     environment:
-      - MONKEY_MONGO_URL=mongodb://127.0.0.1:27017/monkey_island_test
-      - MONGO_URL=mongodb://127.0.0.1:27017/monkey_island_test
+      - MONKEY_MONGO_URL=mongodb://mongo:27017/monkey_island_test
+      - MONGO_URL=mongodb://mongo:27017/monkey_island_test
     depends_on:
       mongo:
         condition: service_healthy
 
-  # ---------- Machine cible "Hello" ----------
-  # Cible SSH simple pour tester les attaques Infection Monkey.
+  # ---------- Machine cible "hello" (SSH) ----------
   hello:
     image: infectionmonkey/ssh1
     container_name: hello
     hostname: hello
     command: '/usr/sbin/sshd -D && sh -c "trap : TERM INT; tail -f /dev/null & wait"'
-    # Décommente si tu veux un accès SSH direct depuis ton hôte :
     # ports:
     #   - "2222:22"
 
   # ---------- NETDATA ----------
-  # Monitoring en temps réel (CPU, RAM, conteneurs, réseau…)
-  # Interface : http://localhost:19999
   netdata:
     image: netdata/netdata:latest
     container_name: netdata
@@ -92,7 +62,8 @@ services:
     cap_add: ["SYS_PTRACE"]
     pid: "host"
     restart: unless-stopped
-    ports: ["19999:19999"]
+    ports:
+      - "19999:19999"
     volumes:
       - netdata_lib:/var/lib/netdata
       - netdata_etc:/etc/netdata
@@ -100,58 +71,92 @@ services:
       - /sys:/host/sys:ro
       - /etc/passwd:/host/etc/passwd:ro
 
-  # ---------- WAZUH (externalisé) ----------
-  # Stack Wazuh (Indexer + Manager + Dashboard) désactivée ici.
-  # Motif :
-  # - L’image Wazuh repose sur OpenSearch (x86-64-v2 / AVX).
-  # - VirtualBox bloque les instructions AVX/SSE4 requises → crash au démarrage.
-  # Solution :
-  # - Utilisation de l’OVA Wazuh officielle (import VirtualBox en bridged)
-  #   ou bien installation sur l’hôte Windows avec Docker Desktop.
-  # - Les conteneurs Kali peuvent ensuite envoyer leurs logs/agents vers l’IP
-  #   de la VM Wazuh externe.
-  #
-  # Option : agent Docker local pour test (commenté ci-dessous)
-  # wazuh-agent:
-  #   image: wazuh/wazuh-agent:latest
-  #   container_name: wazuh-agent
-  #   restart: unless-stopped
-  #   network_mode: host
-  #   environment:
-  #     - WAZUH_MANAGER=<IP_WAZUH_OVA>   # ex: 192.168.1.50
-  #     - WAZUH_AGENT_NAME=kali-agent
+  # ---------- WAZUH Indexer ----------
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.13.1
+    container_name: wazuh-indexer
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile:  { soft: 65536, hard: 65536 }
+    volumes:
+      - wazuh_indexer_data:/var/lib/opensearch
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/opensearch.yml:/usr/share/opensearch/config/opensearch.yml:ro
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/opensearch/config/root-ca.pem:ro
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/usr/share/opensearch/config/node.pem:ro
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/usr/share/opensearch/config/node-key.pem:ro
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/admin.pem:/usr/share/opensearch/config/admin.pem:ro
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/opensearch/config/admin-key.pem:ro
 
-  # ---------- Dockurr/Windows ----------
-  # Ce conteneur émule un Windows Server complet dans Docker.
-  # Il nécessite l’accès à /dev/kvm pour virtualiser avec QEMU + KVM.
-  #
-  # Sous VirtualBox, /dev/kvm n’existe pas (pas de nested virtualization),
-  # donc le conteneur ne peut pas démarrer. Ce n’est pas une erreur du compose :
-  # c’est une limitation technique de VirtualBox.
-  #
-  # ⚙️ Solution :
-  # - Lancer ce conteneur depuis Ubuntu natif, WSL2 ou Docker Desktop.
-  # - Dans VirtualBox, il démarrera uniquement en TCG (émulation logicielle),
-  #   donc extrêmement lent et inutilisable.
-  #
-  # windows:
-  #   image: dockurr/windows
-  #   container_name: windows
-  #   environment:
-  #     VERSION: "2019"
-  #   devices:
-  #     - /dev/kvm
-  #     - /dev/net/tun
-  #   cap_add:
-  #     - NET_ADMIN
-  #   ports:
-  #     - 8006:8006
-  #     - 3389:3389/tcp
-  #     - 3389:3389/udp
-  #   volumes:
-  #     - ./windows:/storage
-  #   restart: always
-  #   stop_grace_period: 2m
+  # ---------- WAZUH Manager ----------
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.13.1
+    container_name: wazuh-manager
+    restart: unless-stopped
+    depends_on:
+      - wazuh-indexer
+    ports:
+      - "1514:1514/udp"
+      - "1515:1515"
+      - "55000:55000"
+    environment:
+      - INDEXER_URL=https://wazuh-indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+    volumes:
+      - wazuh_manager_data:/var/ossec/data
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem:/etc/ssl/root-ca.pem:ro
+
+  # ---------- WAZUH Dashboard (fixed cert paths) ----------
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:4.13.1
+    container_name: wazuh-dashboard
+    restart: unless-stopped
+    depends_on:
+      - wazuh-indexer
+    ports:
+      - "5601:5601"
+    environment:
+      - INDEXER_URL=https://wazuh-indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+    volumes:
+      # Dashboard config
+      - ./wazuh-docker/single-node/config/wazuh_dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml:ro
+      # >>> certs must be at /usr/share/wazuh-dashboard/certs
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem:ro
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard.pem:ro
+      - ./wazuh-docker/single-node/config/wazuh_indexer_ssl_certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem:ro
+
+  # ---------- Windows Server (dockurr/windows) ----------
+  windows:
+    image: dockurr/windows
+    container_name: windows
+    restart: unless-stopped
+    environment:
+      VERSION: "2019"        # 2019/2022
+      RAM_SIZE: "6G"
+      CPU_CORES: "2"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
+    ports:
+      - "8006:8006"          # Console web dockurr
+      - "3389:3389/tcp"      # RDP
+      - "3389:3389/udp"
+    volumes:
+      - ./windows:/storage   # Disques/ISO persistants
 
 # ---------- VOLUMES ----------
 volumes:
@@ -159,3 +164,5 @@ volumes:
   monkey-tutorial-db:
   netdata_lib:
   netdata_etc:
+  wazuh_indexer_data:
+  wazuh_manager_data:
