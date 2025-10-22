@@ -1,7 +1,29 @@
+# ============================================================
+# LAB CYBER - Docker Compose (VM Kali sous VirtualBox / Windows 10)
+# ------------------------------------------------------------
+# Ce fichier regroupe les différents outils du lab :
+#  - Caldera (C2 / émulation d’attaques)
+#  - Infection Monkey (pentest automatisé)
+#  - Netdata (monitoring)
+#  - Wazuh (SIEM) — externalisé à cause d’une contrainte matérielle
+#  - Dockurr/Windows (VM Windows dans Docker) — non fonctionnel ici
+#
+# ⚠️ Contexte important :
+# 1. Cette VM Kali tourne dans VirtualBox sur un hôte Windows.
+# 2. VirtualBox ne transmet pas les extensions CPU AVX / VT-x aux conteneurs Docker.
+# 3. Conséquences :
+#    - Les conteneurs qui exigent x86-64-v2 (Wazuh, MongoDB 6+) refusent de démarrer.
+#    - Les conteneurs basés sur KVM (/dev/kvm) comme dockurr/windows ne peuvent pas s’exécuter.
+#
+# Ces limitations sont matérielles, pas logicielles : elles viennent de VirtualBox.
+# Le compose est donc correct, mais certaines images nécessitent un environnement
+# de virtualisation plus bas-niveau (Ubuntu natif, WSL2 ou Docker Desktop sur l’hôte).
+# ============================================================
+
 services:
   # ---------- CALDERA ----------
-  # Plateforme d’émulation d’attaques (C2).
-  # UI : http://localhost:8888
+  # Plateforme d’émulation d’attaques (C2 Framework MITRE).
+  # Interface Web : http://localhost:8888
   caldera:
     image: ghcr.io/mitre/caldera:latest
     container_name: caldera
@@ -12,8 +34,10 @@ services:
     environment:
       - CALDERA_INSECURE=true
 
-  # ---------- MongoDB (pour Infection Monkey) ----------
-  # Je laisse Mongo en "host networking" pour le rendre dispo en 127.0.0.1:27017.
+  # ---------- MongoDB ----------
+  # Utilisé par Infection Monkey (base de données interne).
+  # Mongo 5+ nécessite AVX → on reste sur Mongo 4.4 (compatible VirtualBox).
+  # Mode réseau "host" pour exposer le port local 27017 à Monkey.
   mongo:
     image: mongo:4.4
     platform: linux/amd64
@@ -31,8 +55,9 @@ services:
       retries: 12
 
   # ---------- Infection Monkey (Monkey Island) ----------
-  # UI : https://localhost:5000 (cert auto-signé)
-  # Il pointe sur Mongo en local (127.0.0.1:27017).
+  # Serveur de gestion Infection Monkey (C2 local).
+  # Interface Web : https://localhost:5000
+  # Se connecte directement à MongoDB (127.0.0.1:27017)
   monkey-island:
     image: infectionmonkey/monkey-island:e7c59c79d
     container_name: monkey-island
@@ -46,19 +71,20 @@ services:
       mongo:
         condition: service_healthy
 
-  # ---------- Machine cible "hello" (SSH) ----------
-  # Petite VM/containeur cible pour les tests d’attaque.
+  # ---------- Machine cible "Hello" ----------
+  # Cible SSH simple pour tester les attaques Infection Monkey.
   hello:
     image: infectionmonkey/ssh1
     container_name: hello
     hostname: hello
     command: '/usr/sbin/sshd -D && sh -c "trap : TERM INT; tail -f /dev/null & wait"'
-    # Décommente si besoin d’un accès SSH depuis l’hôte :
+    # Décommente si tu veux un accès SSH direct depuis ton hôte :
     # ports:
     #   - "2222:22"
 
   # ---------- NETDATA ----------
-  # Monitoring en temps réel : http://localhost:19999
+  # Monitoring en temps réel (CPU, RAM, conteneurs, réseau…)
+  # Interface : http://localhost:19999
   netdata:
     image: netdata/netdata:latest
     container_name: netdata
@@ -74,14 +100,18 @@ services:
       - /sys:/host/sys:ro
       - /etc/passwd:/host/etc/passwd:ro
 
-  # ---------- WAZUH (désactivé localement) ----------
-  # Problème CPU x86-64-v2 sous VirtualBox Windows → je ne lance pas l’indexer/manager/dashboard ici.
-  # À la place, j’utilise l’OVA Wazuh (ou Wazuh sur l’hôte Windows).
+  # ---------- WAZUH (externalisé) ----------
+  # Stack Wazuh (Indexer + Manager + Dashboard) désactivée ici.
+  # Motif :
+  # - L’image Wazuh repose sur OpenSearch (x86-64-v2 / AVX).
+  # - VirtualBox bloque les instructions AVX/SSE4 requises → crash au démarrage.
+  # Solution :
+  # - Utilisation de l’OVA Wazuh officielle (import VirtualBox en bridged)
+  #   ou bien installation sur l’hôte Windows avec Docker Desktop.
+  # - Les conteneurs Kali peuvent ensuite envoyer leurs logs/agents vers l’IP
+  #   de la VM Wazuh externe.
   #
-  # Optionnel : si je veux tester un agent Wazuh *dans* cette Kali
-  # qui envoie vers l’OVA, je peux ajouter un conteneur agent comme ci-dessous
-  # (laisse commenté si tu préfères installer l’agent “classique” sur l’OS).
-  #
+  # Option : agent Docker local pour test (commenté ci-dessous)
   # wazuh-agent:
   #   image: wazuh/wazuh-agent:latest
   #   container_name: wazuh-agent
@@ -90,9 +120,40 @@ services:
   #   environment:
   #     - WAZUH_MANAGER=<IP_WAZUH_OVA>   # ex: 192.168.1.50
   #     - WAZUH_AGENT_NAME=kali-agent
-  #   # Tu peux aussi installer l’agent sur la VM Kali directement (hors Docker) :
-  #   # via “Deploy new agent” depuis le dashboard Wazuh.
 
+  # ---------- Dockurr/Windows ----------
+  # Ce conteneur émule un Windows Server complet dans Docker.
+  # Il nécessite l’accès à /dev/kvm pour virtualiser avec QEMU + KVM.
+  #
+  # Sous VirtualBox, /dev/kvm n’existe pas (pas de nested virtualization),
+  # donc le conteneur ne peut pas démarrer. Ce n’est pas une erreur du compose :
+  # c’est une limitation technique de VirtualBox.
+  #
+  # ⚙️ Solution :
+  # - Lancer ce conteneur depuis Ubuntu natif, WSL2 ou Docker Desktop.
+  # - Dans VirtualBox, il démarrera uniquement en TCG (émulation logicielle),
+  #   donc extrêmement lent et inutilisable.
+  #
+  # windows:
+  #   image: dockurr/windows
+  #   container_name: windows
+  #   environment:
+  #     VERSION: "2019"
+  #   devices:
+  #     - /dev/kvm
+  #     - /dev/net/tun
+  #   cap_add:
+  #     - NET_ADMIN
+  #   ports:
+  #     - 8006:8006
+  #     - 3389:3389/tcp
+  #     - 3389:3389/udp
+  #   volumes:
+  #     - ./windows:/storage
+  #   restart: always
+  #   stop_grace_period: 2m
+
+# ---------- VOLUMES ----------
 volumes:
   caldera_data:
   monkey-tutorial-db:
