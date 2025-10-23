@@ -295,9 +295,11 @@ volumes:
 | Windows (dockurr/windows)        | `dockurr/windows`                   |        VM Windows (optionnelle) pour tests RDP/AD/Windows-specific detections | `3389` (RDP), `8006` (console)            | Requiert `/dev/kvm` et privilèges; utile pour scénarios Windows.              |
 
 
-Ce docker-compose.yml permet donc d'exécuter l'ensemble de ces services !
+**Ce docker-compose.yml permet donc d'exécuter l'ensemble de ces services !**
 
 ![alt text](image-25.png)
+
+*En environnement réel, faire attention aux variables d'environnements, à créer dans un .env !*
 
 ---
 <a id="sec-a"></a>
@@ -496,7 +498,7 @@ Tout a été chiffré et un *README.md* est présent, on peut observer le rappor
 <a id="sec-d"></a>
 ## D. **Windows Server**
 
-Via notre docker-compose.yml, nous avons déployé un Windows Server 2019 (assez rapidement) :
+Via notre docker-compose.yml, nous avons aussi déployé un Windows Server 2019 (assez rapidement) :
 
 ![alt text](image-35.png)
 
@@ -594,9 +596,9 @@ Write-Host "`n[*] Terminé. Vérifie le manager Wazuh (agent doit être connect�
 
 Le script télécharge et installe le MSI officiel Wazuh (version 4.13.1).
 
-Il modifie ossec.conf pour ajouter la surveillance FIM (Desktop, Public Documents, C:\ImportantVault).
+Il modifie *ossec.conf* pour ajouter la surveillance FIM (Desktop, Public Documents, C:\ImportantVault).
 
-Il redémarre le service Wazuh et crée un fichier test sur le Desktop :
+Il redémarre le service Wazuh et crée un fichier *test.txt* sur le Desktop :
 
 ![alt text](image-38.png)
 
