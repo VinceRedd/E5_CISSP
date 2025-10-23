@@ -422,12 +422,12 @@ L'agent s'est bien déployé :
 ![alt text](image-9.png)
 ![alt text](image-10.png)
 
-
-![alt text](image-11.png)
-
 xx
 
 #### 3 — Déploiement opération
+
+![alt text](image-11.png)
+On créé une opération qui va simuler des commandes "discovery" sur la machine (whoami etc...)
 ![alt text](image-14.png)
 
 L'opération se lance bien avec un ensemble de commandes qui s'executent !
@@ -443,3 +443,4 @@ On observe que notre agent est bien présent et on peut analyser ça :
 ![alt text](image-17.png)
 
 On voit bien les remontées d'informations directement sur notre interface !
+Les exécutions de notre opération passant par notre agent précédemment créé sont détectées !
