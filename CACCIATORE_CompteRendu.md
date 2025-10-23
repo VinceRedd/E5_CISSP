@@ -301,7 +301,7 @@ volumes:
 | Cible (SSH) - hello              | `infectionmonkey/ssh1`              | Conteneur cible vulnérable (SSH) — utilisé pour tests et déploiement d'agents | (optionnel) `2222` si exposé              | Contient l'agent Sandcat / espaces de test (home/vault).                      |
 | Wazuh Agent - hello              | `wazuh/wazuh-agent:4.13.1`          |          Agent installé sur la cible pour remonter télémétrie vers le manager | n/a (communication sortante vers manager) | Peut être installé in-container (hello) ou sur conteneur agent séparé.        |                                    |
 | Netdata                          | `netdata/netdata:latest`            |              Observabilité temps réel (CPU/Memory/Disk/Network per container) | `19999`                                   | Monte `/var/run/docker.sock` en lecture pour lier conteneurs et noms.         |
-| Windows (dockurr/windows)        | `dockurr/windows`                   |        VM Windows (optionnelle) pour tests RDP/AD/Windows-specific detections | `3389` (RDP), `8006` (console)            | Requiert `/dev/kvm` et privilèges; utile pour scénarios Windows.              |
+| Windows (dockurr/windows)        | `dockurr/windows`                   |        VM Windows pour tests | `3389` (RDP), `8006` (console)            | Requiert `/dev/kvm` et privilèges; utile pour scénarios Windows.              |
 
 
 **Ce docker-compose.yml permet donc d'exécuter l'ensemble de ces services !**
