@@ -35,9 +35,19 @@
 ---
 <a id="sec-2"></a>
 ## 2. Architecture déployée
+Nous avons choisi une VM Ubuntu via VirtualBox pour centraliser le déploiement Docker. Ce choix permet : portabilité, isolation, et réplication simple via des images Docker.
 
 ### Schéma de l'infrastructure
 ![alt text](image-24.png)
+
+Afin de préparer notre VM, on exécute ces commandes :
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y docker.io docker-compose git
+sudo systemctl enable --now docker
+```
+
+On peut désormais exécuter notre docker compose assez complet !
 
 ### *docker-compose.yml*
 ```bash
@@ -299,7 +309,7 @@ volumes:
 
 ![alt text](image-25.png)
 
-*En environnement réel, faire attention aux variables d'environnements, à créer dans un .env !*
+*En réel, faire attention aux variables d'environnements, à créer dans un .env !*
 
 ---
 <a id="sec-a"></a>
@@ -403,7 +413,9 @@ Déployer et contrôler des agents Sandcat (HTTP et P2P) depuis Caldera afin d'�
 
 #### 1 — Credentials & connexion
 On se rend sur http://localhost:8888
+
 ![alt text](image-6.png)
+
 Caldera, par défaut, conserve une config dans le conteneur. Pour retrouver le user/password `red` (ou les credentials utiles), on ouvre un shell dans le conteneur Caldera :
 
 ```bash
@@ -441,14 +453,21 @@ On créé une opération qui va exécuter des commandes "discovery" sur la machi
 
 ![alt text](image-14.png)
 ![alt text](image-33.png)
+
 L'opération se lance bien avec un ensemble de commandes qui s'exécutent !
 On a aussi la possibilité d'en lancer manuellement.
 
+![alt text](image-39.png)
+On observe d'ailleurs sur netdata ces exécutions se traduisant par des pics d'utilisation CPU (entre autre).
+
 #### 4 — Wazuh
 On se rend sur https://localhost et on se connecte avec les credentials par défaut : 
+
 ![alt text](image-18.png)
+
 On arrive sur l'interface global :
 ![alt text](image-16.png)
+
 On observe que notre agent est bien présent et on peut analyser les remontées via l'onglet "Threat Hunting" :
 ![alt text](image-15.png)
 
@@ -468,10 +487,10 @@ Infection Monkey (Guardicore) est un simulateur d'attaques autonome. Il permet d
 #### 1 — Credentials & connexion
 Paramètres importants :
 
-Scan target list : définition des IP/hôtes à scanner.
-Scan Agent's networks : option à cocher si l'agent doit scanner ses interfaces.
-File extension : .m0nk3y (extension appliquée aux fichiers chiffrés).
-Linux target directory : /tmp/monkey_demo (ou /home/user/vault selon configuration).
+- Scan target list : définition des IP/hôtes à scanner.
+- Scan Agent's networks : option à cocher si l'agent doit scanner ses interfaces.
+- File extension : .m0nk3y (extension appliquée aux fichiers chiffrés).
+- Linux target directory : /tmp/monkey_demo (ou /home/user/vault selon configuration).
 
 ![alt text](image-19.png)
 
@@ -506,92 +525,251 @@ Via notre docker-compose.yml, nous avons aussi déployé un Windows Server 2019 
 
 En admin, on lance ce script :
 ```bash
-# ------------------------------
-# 1) Variables (modifier si besoin)
-$MANAGER_IP = '172.19.0.8'      # <- remplace si nécessaire
-$WAZUH_VERSION = '4.13.1'       # version agent
-$TMP = "$env:TEMP\wazuh_inst"
-$MSI = "wazuh-agent-$WAZUH_VERSION.msi"
-$MSI_URL = "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.13.1.msi"
-$OSSEC_CONF = "C:\Program Files (x86)\ossec-agent\ossec.conf"
-$BACKUP = "$OSSEC_CONF.bak.$((Get-Date).ToString('yyyyMMddHHmmss'))"
-# ------------------------------
+[CmdletBinding()]
+param(
+    # Je garde l'IP du manager en paramètre pour pouvoir rejouer le script facilement sur d'autres environnements
+    [Parameter(Mandatory=$true)]
+    [ValidatePattern('^((25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(25[0-5]|2[0-4]\d|[01]?\d?\d)$')]
+    [string]$ManagerIP,
 
-# Create temp dir
-New-Item -Path $TMP -ItemType Directory -Force | Out-Null
+    # Version de l'agent Wazuh à déployer
+    [string]$WazuhVersion = '4.13.1',
+)
 
-Write-Host "[*] Téléchargement du MSI Wazuh..."
-Invoke-WebRequest -Uri $MSI_URL -OutFile "$TMP\$MSI"
+# ----- Sécurité & journalisation -------------------------------------------------
+# Je veux tracer ce que je fais (utile pour debug dans un runbook)
+$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$transcriptPath = Join-Path -Path $env:TEMP -ChildPath "wazuh_installer_$timestamp.log"
+try { Start-Transcript -Path $transcriptPath -ErrorAction Stop | Out-Null } catch {}
 
-Write-Host "[*] Installation silencieuse du Wazuh agent (avec manager $MANAGER_IP)..."
-Start-Process msiexec.exe -Wait -ArgumentList "/i `"$TMP\$MSI`" /qn SERVER_ADDR=$MANAGER_IP"
-
-# Wait a bit
-Start-Sleep -Seconds 4
-
-# Backup ossec.conf
-if (Test-Path $OSSEC_CONF) {
-    Copy-Item -Path $OSSEC_CONF -Destination $BACKUP -Force
-    Write-Host "[*] Sauvegarde de ossec.conf -> $BACKUP"
-} else {
-    Write-Host "[!] ossec.conf introuvable à $OSSEC_CONF - vérifie le chemin d'installation"
-}
-
-# Insert FIM directories into <syscheck> section (idempotent)
-$snippet = @"
-  <!-- Ajouté automatiquement: surveille Desktop et dossier ImportantVault -->
-  <directories check_all="yes" report_changes="yes" realtime="yes">C:\Users\Public\Documents</directories>
-  <directories check_all="yes" report_changes="yes" realtime="yes">C:\Users\%USERNAME%\Desktop</directories>
-  <directories check_all="yes" report_changes="yes" realtime="yes">C:\ImportantVault</directories>
-"@
-
-try {
-    $xml = [xml](Get-Content $OSSEC_CONF -Raw)
-} catch {
-    Write-Host "[!] Impossible de parser $OSSEC_CONF en XML"
+# Le script doit être lancé en admin
+$IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $IsAdmin) {
+    Write-Error "Ce script doit être exécuté en tant qu'Administrateur."
+    Stop-Transcript | Out-Null
     exit 1
 }
 
-# Ensure <syscheck> exists
-if (-not $xml.ossec_config.syscheck) {
-    $syscheckNode = $xml.CreateElement("syscheck")
-    $xml.ossec_config.AppendChild($syscheckNode) | Out-Null
+# ----- Variables -----------------------------------------------------------------
+$TmpRoot       = Join-Path $env:TEMP 'wazuh_inst'
+$MsiName       = "wazuh-agent-$WazuhVersion.msi"
+$MsiUrl        = "https://packages.wazuh.com/4.x/windows/$MsiName"
+
+# L'agent Wazuh 64 bits s'installe par défaut sous 'Program Files (x86)' (service 32 bits).
+$OssecConfPathX86 = 'C:\Program Files (x86)\ossec-agent\ossec.conf'
+$OssecConfPath    = if (Test-Path $OssecConfPathX86) { $OssecConfPathX86 } else { 'C:\Program Files\ossec-agent\ossec.conf' }
+$BackupPath       = "$OssecConfPath.bak.$timestamp"
+
+$DesktopPath      = [Environment]::GetFolderPath('Desktop')
+$VaultPath        = 'C:\ImportantVault'
+
+# Répertoires FIM que je veux absolument surveiller
+$FimDirs = @(
+    'C:\Users\Public\Documents',
+    "$DesktopPath",
+    $VaultPath
+)
+
+# ----- Fonctions utilitaires -----------------------------------------------------
+function Test-Url {
+    param([string]$Url)
+    try {
+        $req = [System.Net.WebRequest]::Create($Url)
+        $req.Method = 'HEAD'
+        $req.Timeout = 5000
+        $resp = $req.GetResponse()
+        $resp.Close()
+        return $true
+    } catch { return $false }
 }
 
-# Add snippet only if not present already (prevenir doublons)
-$syscheckRaw = $xml.ossec_config.syscheck.InnerXml
-if ($syscheckRaw -notlike '*ImportantVault*' -and $syscheckRaw -notlike '*Public\Documents*') {
-    # Inject snippet text into syscheck node (preserve xml structure by appending nodes)
-    # We'll append as text and then re-save.
-    $xml.ossec_config.syscheck.InnerXml = $xml.ossec_config.syscheck.InnerXml + $snippet
-    $xml.Save($OSSEC_CONF)
-    Write-Host "[*] Snippet FIM ajouté dans $OSSEC_CONF"
+function Get-FileSha256 {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path $Path)) { return '' }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $fs  = [System.IO.File]::OpenRead($Path)
+    try {
+        $hashBytes = $sha.ComputeHash($fs)
+        ($hashBytes | ForEach-Object { $_.ToString('x2') }) -join ''
+    } finally {
+        $fs.Dispose()
+        $sha.Dispose()
+    }
+}
+
+function Ensure-Directory {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path -Force | Out-Null }
+}
+
+function Add-FimDirectory {
+    <#
+        J'ajoute proprement un <directories> sous <syscheck> si non présent, via XPath.
+        Je garde idempotence : pas de doublon si déjà existant.
+    #>
+    param(
+        [xml]$XmlDoc,
+        [string]$DirPath
+    )
+    $syscheck = $XmlDoc.ossec_config.syscheck
+    if (-not $syscheck) {
+        $syscheck = $XmlDoc.CreateElement('syscheck')
+        [void]$XmlDoc.ossec_config.AppendChild($syscheck)
+    }
+
+    # XPath pour voir si le répertoire est déjà suivi
+    $escaped = $DirPath.Replace('\','\\')  # échapper les backslashes pour XPath
+    $exists = $syscheck.SelectSingleNode("directories[text()='$escaped']")
+
+    if (-not $exists) {
+        $node = $XmlDoc.CreateElement('directories')
+        $node.SetAttribute('check_all','yes')
+        $node.SetAttribute('report_changes','yes')
+        $node.SetAttribute('realtime','yes')
+        $node.InnerText = $DirPath
+        [void]$syscheck.AppendChild($node)
+        return $true
+    }
+    return $false
+}
+
+# ----- Téléchargement du MSI -----------------------------------------------------
+Ensure-Directory $TmpRoot
+$MsiPath = Join-Path $TmpRoot $MsiName
+
+Write-Host "[*] Téléchargement du MSI Wazuh depuis $MsiUrl ..."
+if (-not (Test-Url $MsiUrl)) {
+    Write-Error "URL inaccessible : $MsiUrl"
+    Stop-Transcript | Out-Null
+    exit 1
+}
+
+# Je tente d'abord BITS (plus robuste), sinon je bascule sur Invoke-WebRequest
+$downloaded = $false
+try {
+    Start-BitsTransfer -Source $MsiUrl -Destination $MsiPath -ErrorAction Stop
+    $downloaded = Test-Path $MsiPath
+} catch {
+    Write-Warning "BITS a échoué, je tente Invoke-WebRequest : $($_.Exception.Message)"
+    try {
+        Invoke-WebRequest -Uri $MsiUrl -OutFile $MsiPath -UseBasicParsing -ErrorAction Stop
+        $downloaded = Test-Path $MsiPath
+    } catch {
+        Write-Error "Echec du téléchargement du MSI : $($_.Exception.Message)"
+        Stop-Transcript | Out-Null
+        exit 1
+    }
+}
+
+if (-not $downloaded) {
+    Write-Error "Le MSI n'a pas été téléchargé correctement."
+    Stop-Transcript | Out-Null
+    exit 1
+}
+
+# Vérification SHA256 si fournie
+if ($MsiSha256) {
+    $actual = Get-FileSha256 -Path $MsiPath
+    if ($actual.ToLower() -ne $MsiSha256.ToLower()) {
+        Write-Error "Le hash SHA256 du MSI ne correspond pas. Attendu=$MsiSha256, Obtenu=$actual"
+        Stop-Transcript | Out-Null
+        exit 1
+    } else {
+        Write-Host "[*] Hash SHA256 validé."
+    }
+}
+
+# ----- Installation silencieuse --------------------------------------------------
+Write-Host "[*] Installation silencieuse du Wazuh agent (SERVER_ADDR=$ManagerIP) ..."
+$msiArgs = "/i `"$MsiPath`" /qn SERVER_ADDR=$ManagerIP"
+$proc = Start-Process msiexec.exe -ArgumentList $msiArgs -PassThru -Wait
+if ($proc.ExitCode -ne 0) {
+    Write-Error "msiexec a retourné le code $($proc.ExitCode)."
+    Stop-Transcript | Out-Null
+    exit $proc.ExitCode
+}
+
+Start-Sleep -Seconds 4
+
+# ----- Sauvegarde et modification d'ossec.conf -----------------------------------
+if (-not (Test-Path $OssecConfPath)) {
+    Write-Error "ossec.conf introuvable à l'emplacement attendu : $OssecConfPath"
+    Stop-Transcript | Out-Null
+    exit 1
+}
+
+Copy-Item -Path $OssecConfPath -Destination $BackupPath -Force
+Write-Host "[*] Sauvegarde de ossec.conf -> $BackupPath"
+
+# Je parse le XML proprement
+try {
+    [xml]$xml = Get-Content $OssecConfPath -Raw -ErrorAction Stop
+} catch {
+    Write-Error "Impossible de parser $OssecConfPath en XML : $($_.Exception.Message)"
+    Stop-Transcript | Out-Null
+    exit 1
+}
+
+# Je m'assure que la section ossec_config existe (normalement oui)
+if (-not $xml.ossec_config) {
+    $root = $xml.CreateElement('ossec_config')
+    [void]$xml.AppendChild($root)
+}
+
+# Je crée le dossier Vault si nécessaire, et j'ajoute chaque répertoire FIM (idempotent)
+Ensure-Directory $VaultPath
+$added = 0
+foreach ($d in $FimDirs) {
+    if (Add-FimDirectory -XmlDoc $xml -DirPath $d) { $added++ }
+}
+if ($added -gt 0) {
+    $xml.Save($OssecConfPath)
+    Write-Host "[*] Directoires FIM ajoutés ($added) dans ossec.conf"
 } else {
-    Write-Host "[*] Snippet FIM déjà présent, pas de modification."
+    Write-Host "[*] Directoires FIM déjà présents, aucune modification."
 }
 
-# Restart service
-Write-Host "[*] Redémarrage du service wazuh-agent..."
-Restart-Service -Name "wazuh-agent" -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 3
+# ----- Redémarrage du service ----------------------------------------------------
+Write-Host "[*] Redémarrage du service 'wazuh-agent' ..."
+try {
+    if ((Get-Service 'wazuh-agent' -ErrorAction Stop).Status -eq 'Running') {
+        Restart-Service -Name 'wazuh-agent' -Force -ErrorAction Stop
+    } else {
+        Start-Service -Name 'wazuh-agent' -ErrorAction Stop
+    }
+    Start-Sleep -Seconds 5
+} catch {
+    Write-Error "Impossible de (re)démarrer le service wazuh-agent : $($_.Exception.Message)"
+}
 
-# Create test file
-Write-Host "[*] Création d'un fichier test et d'un fichier .encrypted sur le Desktop..."
-$desktop = Join-Path -Path $env:USERPROFILE -ChildPath 'Desktop'
-New-Item -ItemType Directory -Path $desktop -Force | Out-Null
-$testFile = Join-Path $desktop ("test" + ".txt")
-"simu_encrypted" | Out-File -FilePath $encrypted -Encoding UTF8
+# ----- Fichiers de test sur le Bureau -------------------------------------------
+Write-Host "[*] Génération de fichiers de test sur le Bureau ..."
+Ensure-Directory $DesktopPath
 
-# Show recent ossec.log tail
-$logPath = "C:\Program Files (x86)\ossec-agent\logs\ossec.log"
-Write-Host "`n[*] 10 dernières lignes de ossec.log (si dispo):"
-if (Test-Path $logPath) {
-    Get-Content $logPath -Tail 10
+$testFile      = Join-Path $DesktopPath 'test.txt'
+$encTestFile   = Join-Path $DesktopPath 'test.txt.encrypted'
+
+'hello_wazuh'      | Out-File -FilePath $testFile -Encoding UTF8 -Force
+'simu_encrypted'   | Out-File -FilePath $encTestFile -Encoding UTF8 -Force
+
+Write-Host "[*] Fichiers créés :"
+Write-Host "    - $testFile"
+Write-Host "    - $encTestFile"
+
+# ----- Journal Wazuh côté agent --------------------------------------------------
+$AgentLog = 'C:\Program Files (x86)\ossec-agent\logs\ossec.log'
+if (-not (Test-Path $AgentLog)) { $AgentLog = 'C:\Program Files\ossec-agent\logs\ossec.log' }
+
+Write-Host "`n[*] 20 dernières lignes de ossec.log (si dispo) :"
+if (Test-Path $AgentLog) {
+    try { Get-Content $AgentLog -Tail 20 } catch { Write-Warning "Lecture du log impossible : $($_.Exception.Message)" }
 } else {
-    Write-Host "[!] $logPath introuvable"
+    Write-Warning "ossec.log introuvable."
 }
 
-Write-Host "`n[*] Terminé. Vérifie le manager Wazuh (agent doit être connecté)."
+Write-Host "`n[*] Terminé. Vérifie sur le Manager Wazuh ($ManagerIP) que l'agent apparaît bien en ligne."
+try { Stop-Transcript | Out-Null } catch {}
+
 ```
 
 Le script télécharge et installe le MSI officiel Wazuh (version 4.13.1).
