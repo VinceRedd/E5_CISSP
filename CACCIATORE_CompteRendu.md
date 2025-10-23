@@ -3,7 +3,7 @@
 
 *22 octobre 2025*
 
-# XXX
+# Projet CISSP IS Security Best Practices
 
 ## 📑 Table des matières
 XXXX
@@ -11,7 +11,7 @@ XXXX
 ---
 
 > **But** : démontrer l’intérêt d’une stratégie d’**adversary emulation** en déployant un lab *all-in-one*, en lançant des attaques automatisées/contrôlées et en montrant les traces dans un SIEM/outil d’observabilité.  
-> **Périmètre** : lab local (VM Ubuntu Server / Docker Compose). Pas d’expositions publiques.
+> **Périmètre** : lab local (VM Ubuntu Server / Docker Compose).
 
 ---
 
@@ -275,7 +275,7 @@ Stack lancée depuis `~/Final` via `docker compose up -d` :
 - **Wazuh Dashboard** (`wazuh.dashboard:4.13.1`) — UI/Kibana (port `443` exposé)  
 - **Caldera** (`caldera`) — C2 pour émulation d’adversaire (port `8888`)  
 - **MongoDB** + **Infection Monkey (monkey-island)** — outil d’attaque automatique (port `5000`)  
-- **Cibles** : `hello` (SSH vuln container), (optionnel) `juice-shop` si présent  
+- **Cibles** : `hello` (SSH vuln container)
 - **Agents Wazuh** : `wazuh.agent-hello`, `wazuh.agent-juice` — pour remonter télémétrie depuis les cibles  
 - **Netdata** (`netdata`) — observabilité temps réel (port `19999`)  
 - **Windows (dockurr/windows)** — optionnel (profil bonus), fonctionne si `/dev/kvm` dispo
@@ -294,7 +294,6 @@ Générer une charge HTTP élevée sur plusieurs conteneurs web pour :
 
 > **ATTENTION** : tests agressifs peuvent saturer la VM / faire swapper / rendre la VM inutilisable.
 
----
 
 #### 1 — Déployer trois conteneurs web (commandes)
 Copier/coller sur la VM hôte (ou exécuter localement si Docker installé) :
@@ -323,8 +322,6 @@ Sur l’Ubuntu (où tu lances les tests) :
 sudo apt update
 sudo apt install -y apache2-utils
 ```
-
----
 
 #### 3 — Tests de charge (progressifs)
 
@@ -363,8 +360,6 @@ Pour arrêter tous les `ab` :
 pkill ab
 ```
 
----
-
 #### 4 — Surveillance & vérifications pendant le test
 
 Dans **Netdata** (`http://localhost:19999`) :  
@@ -380,8 +375,6 @@ Dans **Netdata** (`http://localhost:19999`) :
 ![alt text](image-3.png)
 ![alt text](image-5.png)
 
----
-
 #### 5 — Interprétation
 - **Conteneurs qui consomment le plus CPU** → corrélation avec `ab` ciblant le port (nginx/httpd/caddy).  
 - **Saturation CPU → montée du load average** → risque d’échec de réponses, augmentation latence, erreurs 5xx.  
@@ -390,4 +383,30 @@ Dans **Netdata** (`http://localhost:19999`) :
 - **Network I/O** → pics pendant benchs (exfil possible si simulateur d’exfil).  
 - **Erreurs HTTP (5xx)** dans les logs applicatifs (si juice-shop/nginx/httpd retournent des erreurs).
 
-Ce premier stress test valide la visibilité de l’infrastructure via Netdata et montre la montée en charge maîtrisée des conteneurs. Il sert de point de référence pour mesurer l’impact des futures opérations offensives
+Ce premier stress test valide la visibilité de l’infrastructure via Netdata et montre la montée en charge maîtrisée des conteneurs. Il sert de point de référence pour mesurer l’impact des futures opérations offensives.
+
+---
+### B. **Caldera** - C2
+#### Objectif
+XXX
+
+
+#### 1 — Connexion
+On se rend sur http://localhost:8888
+![alt text](image-6.png)
+
+Pour connaitre le mot de passe, on ouvre un shell dans le conteneur Caldera :
+```bash
+docker exec -it caldera /bin/bash || docker exec -it caldera /bin/sh
+```
+
+Puis on affiche le contenu :
+```bash
+cat /usr/src/app/conf/local.yml
+```
+
+![alt text](image-7.png)
+
+On peut enfin se connecter : 
+![alt text](image-8.png)
+
