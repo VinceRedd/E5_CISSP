@@ -457,6 +457,7 @@ L'opération se lance bien avec un ensemble de commandes qui s'exécutent !
 On a aussi la possibilité d'en lancer manuellement.
 
 ![alt text](image-39.png)
+
 On observe d'ailleurs sur netdata ces exécutions se traduisant par des pics d'utilisation CPU (entre autre).
 
 #### 4 — Wazuh
