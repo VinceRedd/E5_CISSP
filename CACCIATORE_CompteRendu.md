@@ -272,15 +272,20 @@ volumes:
   netdata_etc:
 ```
 
-- **Wazuh Indexer** (`wazuh.indexer:4.13.1`) — indexation / moteur (port `9200`)  
-- **Wazuh Manager** (`wazuh.manager:4.13.1`) — collecte / rules / API (ports `1514`, `1515`, `514/udp`, `55000`)  
-- **Wazuh Dashboard** (`wazuh.dashboard:4.13.1`) — UI/Kibana (port `443` exposé)  
-- **Caldera** (`caldera`) — C2 pour émulation d’adversaire (port `8888`)  
-- **MongoDB** + **Infection Monkey (monkey-island)** — outil d’attaque automatique (port `5000`)  
-- **Cibles** : `hello` (SSH vuln container)
-- **Agents Wazuh** : `wazuh.agent-hello`, `wazuh.agent-juice` — pour remonter télémétrie depuis les cibles  
-- **Netdata** (`netdata`) — observabilité temps réel (port `19999`)  
-- **Windows (dockurr/windows)** — (windows serveur - bonus)
+| Service                          | Image                               |                                                            Rôle / Description | Ports exposés                             | Remarques                                                                     |
+| -------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------: | ----------------------------------------- | ----------------------------------------------------------------------------- |
+| Wazuh Indexer                    | `wazuh/wazuh-indexer:4.13.1`        | Moteur d'indexation (équivalent OpenSearch) — stockage et indexation des logs | `9200`                                    | Nécessite certificats SSL (root-ca, admin certs).                             |
+| Wazuh Manager                    | `wazuh/wazuh-manager:4.13.1`        |                     Collecte et corrélation des logs, gestion des agents, API | `1514`, `1515`, `514/udp`, `55000`        | Configuration: `INDEXER_URL=https://wazuh.indexer:9200`. Dépend de l'indexer. |
+| Wazuh Dashboard                  | `wazuh/wazuh-dashboard:4.13.1`      |        Interface utilisateur (Kibana-like) pour visualiser alertes / tableaux | `5601` (mappé sur `443` hôte)             | Variables d'environnement pour connexion à l'indexer/manager.                 |
+| Caldera                          | `ghcr.io/mitre/caldera:latest`      |                                           Plateforme C2 / adversary emulation | `8888`                                    | Utilisé pour déployer agents Sandcat et lancer opérations d'émulation.        |
+| MongoDB                          | `mongo:4.4`                         |                            Base de données (nécessaire pour Monkey / Caldera) | `27017`                                   | Healthcheck activé ; platform linux/amd64.                                    |
+| Infection Monkey (Monkey Island) | `infectionmonkey/monkey-island:...` |       Outil d'attaque automatique / simulation (ransomware, lateral movement) | `5000`                                    | UI HTTPS; nécessite connexion d'agents monkey sur cibles.                     |
+| Cible (SSH) - hello              | `infectionmonkey/ssh1`              | Conteneur cible vulnérable (SSH) — utilisé pour tests et déploiement d'agents | (optionnel) `2222` si exposé              | Contient l'agent Sandcat / espaces de test (home/vault).                      |
+| Wazuh Agent - hello              | `wazuh/wazuh-agent:4.13.1`          |          Agent installé sur la cible pour remonter télémétrie vers le manager | n/a (communication sortante vers manager) | Peut être installé in-container (hello) ou sur conteneur agent séparé.        |
+| Wazuh Agent - juice              | `wazuh/wazuh-agent:4.13.1`          |                                    Agent pour la cible juice-shop (optionnel) | n/a                                       | Même rôle que ci-dessus pour la cible web.                                    |
+| Netdata                          | `netdata/netdata:latest`            |              Observabilité temps réel (CPU/Memory/Disk/Network per container) | `19999`                                   | Monte `/var/run/docker.sock` en lecture pour lier conteneurs et noms.         |
+| Windows (dockurr/windows)        | `dockurr/windows`                   |        VM Windows (optionnelle) pour tests RDP/AD/Windows-specific detections | `3389` (RDP), `8006` (console)            | Requiert `/dev/kvm` et privilèges; utile pour scénarios Windows.              |
+
 
 Ce docker-compose.yml permet donc d'exécuter l'ensemble de ces services !
 
@@ -428,7 +433,7 @@ On créé une opération qui va exécuter des commandes "discovery" sur la machi
 L'opération se lance bien avec un ensemble de commandes qui s'exécutent !
 On a aussi la possibilité d'en lancer manuellement.
 
-#### 3 — Wazuh
+#### 4 — Wazuh
 On se rend sur https://localhost et on se connecte avec les credentials par défaut : 
 ![alt text](image-18.png)
 On arrive sur l'interface global :
@@ -462,7 +467,8 @@ On télécharge tous les plugins safe puis on active le plugin *ransomware* :
  
 ![alt text](image-23.png)
 
-On définit notre cible et on exécute :
+#### 2 — Execution
+On définit notre cible et on run :
 ![alt text](image-27.png)
 
 ![alt text](image-34.png)
@@ -474,3 +480,5 @@ Après l'exécution, on observe les fichiers dans le répertoire cible :
 Tout a été chiffré et un *README.md* est présent, on peut observer le rapport sur l'interface également :
 ![alt text](image-31.png)
 ![alt text](image-32.png)
+
+
