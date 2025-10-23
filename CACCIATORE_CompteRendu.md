@@ -26,8 +26,12 @@ XXXX
 
 ---
 
-## 2. Architecture déployée (description de mon infra)
+## 2. Architecture déployée
 
+### Schéma de l'infrastructure
+![alt text](image-24.png)
+
+### *docker-compose.yml*
 ```bash
 services:
   # ---------- WAZUH INDEXER ----------
@@ -276,9 +280,11 @@ volumes:
 - **Cibles** : `hello` (SSH vuln container)
 - **Agents Wazuh** : `wazuh.agent-hello`, `wazuh.agent-juice` — pour remonter télémétrie depuis les cibles  
 - **Netdata** (`netdata`) — observabilité temps réel (port `19999`)  
-- **Windows (dockurr/windows)** — (bonus)
+- **Windows (dockurr/windows)** — (windows serveur - bonus)
 
 Ce docker-compose.yml permet donc d'exécuter l'ensemble de ces services !
+
+![alt text](image-25.png)
 
 ---
 
@@ -290,7 +296,7 @@ Générer une charge HTTP élevée sur plusieurs conteneurs web pour :
 - valider que Netdata identifie les conteneurs par nom,
 - produire captures & métriques.
 
-> **ATTENTION** : tests agressifs peuvent saturer la VM / faire swapper / rendre la VM inutilisable.
+> **ATTENTION** : tests agressifs pouvant saturer la VM / faire swapper / rendre la VM inutilisable.
 
 
 #### 1 — Déployer trois conteneurs web (commandes)
@@ -444,3 +450,14 @@ On observe que notre agent est bien présent et on peut analyser ça :
 
 On voit bien les remontées d'informations directement sur notre interface !
 Les exécutions de notre opération passant par notre agent précédemment créé sont détectées !
+
+### B. **Monkey**
+#### Objectif
+
+
+
+
+
+![alt text](image-19.png)
+![alt text](image-22.png)
+![alt text](image-23.png)
