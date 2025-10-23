@@ -293,7 +293,7 @@ Ce docker-compose.yml permet donc d'exécuter l'ensemble de ces services !
 
 ---
 
-### A. **Stress test** - Visualisation Netdata
+## A. **Stress test** - Visualisation Netdata
 
 #### Objectif
 Générer une charge HTTP élevée sur plusieurs conteneurs web pour :
@@ -385,7 +385,7 @@ Des performances "normales", *windows* est en premier en consommation de RAM car
 Ce stress test valide la visibilité de l’infrastructure via Netdata et montre la montée en charge maîtrisée des conteneurs.
 
 ---
-### B. **Caldera & Wazuh**
+## B. **Caldera & Wazuh**
 #### Objectif
 Déployer et contrôler des agents Sandcat (HTTP et P2P) depuis Caldera afin d'émuler des TTPs et collecter traces/logs dans Wazuh et Netdata.
 
@@ -448,7 +448,9 @@ On voit bien les remontées d'informations directement sur notre interface :
 
 Les exécutions de notre opération passant par notre agent précédemment créé sont détectées !
 
-### C. **Infection Monkey**
+---
+
+## C. **Infection Monkey**
 #### Objectif
 Infection Monkey (Guardicore) est un simulateur d'attaques autonome. Il permet de configurer des agents, définir des cibles, et exécuter des scénarios (ex : chiffrement de fichiers) pour évaluer la résilience et la détection.
 
@@ -480,5 +482,116 @@ Après l'exécution, on observe les fichiers dans le répertoire cible :
 Tout a été chiffré et un *README.md* est présent, on peut observer le rapport sur l'interface également :
 ![alt text](image-31.png)
 ![alt text](image-32.png)
+
+---
+
+## D. **Windows Server**
+
+Via notre docker-compose.yml, nous avons déployé un Windows Server 2019 (assez rapidement) :
+
+![alt text](image-35.png)
+
+#### 1 — Script PowerShell
+
+En admin, on lance ce script :
+```bash
+# ------------------------------
+# 1) Variables (modifier si besoin)
+$MANAGER_IP = '172.19.0.8'      # <- remplace si nécessaire
+$WAZUH_VERSION = '4.13.1'       # version agent
+$TMP = "$env:TEMP\wazuh_inst"
+$MSI = "wazuh-agent-$WAZUH_VERSION.msi"
+$MSI_URL = "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.13.1.msi"
+$OSSEC_CONF = "C:\Program Files (x86)\ossec-agent\ossec.conf"
+$BACKUP = "$OSSEC_CONF.bak.$((Get-Date).ToString('yyyyMMddHHmmss'))"
+# ------------------------------
+
+# Create temp dir
+New-Item -Path $TMP -ItemType Directory -Force | Out-Null
+
+Write-Host "[*] Téléchargement du MSI Wazuh..."
+Invoke-WebRequest -Uri $MSI_URL -OutFile "$TMP\$MSI"
+
+Write-Host "[*] Installation silencieuse du Wazuh agent (avec manager $MANAGER_IP)..."
+Start-Process msiexec.exe -Wait -ArgumentList "/i `"$TMP\$MSI`" /qn SERVER_ADDR=$MANAGER_IP"
+
+# Wait a bit
+Start-Sleep -Seconds 4
+
+# Backup ossec.conf
+if (Test-Path $OSSEC_CONF) {
+    Copy-Item -Path $OSSEC_CONF -Destination $BACKUP -Force
+    Write-Host "[*] Sauvegarde de ossec.conf -> $BACKUP"
+} else {
+    Write-Host "[!] ossec.conf introuvable à $OSSEC_CONF - vérifie le chemin d'installation"
+}
+
+# Insert FIM directories into <syscheck> section (idempotent)
+$snippet = @"
+  <!-- Ajouté automatiquement: surveille Desktop et dossier ImportantVault -->
+  <directories check_all="yes" report_changes="yes" realtime="yes">C:\Users\Public\Documents</directories>
+  <directories check_all="yes" report_changes="yes" realtime="yes">C:\Users\%USERNAME%\Desktop</directories>
+  <directories check_all="yes" report_changes="yes" realtime="yes">C:\ImportantVault</directories>
+"@
+
+try {
+    $xml = [xml](Get-Content $OSSEC_CONF -Raw)
+} catch {
+    Write-Host "[!] Impossible de parser $OSSEC_CONF en XML"
+    exit 1
+}
+
+# Ensure <syscheck> exists
+if (-not $xml.ossec_config.syscheck) {
+    $syscheckNode = $xml.CreateElement("syscheck")
+    $xml.ossec_config.AppendChild($syscheckNode) | Out-Null
+}
+
+# Add snippet only if not present already (prevenir doublons)
+$syscheckRaw = $xml.ossec_config.syscheck.InnerXml
+if ($syscheckRaw -notlike '*ImportantVault*' -and $syscheckRaw -notlike '*Public\Documents*') {
+    # Inject snippet text into syscheck node (preserve xml structure by appending nodes)
+    # We'll append as text and then re-save.
+    $xml.ossec_config.syscheck.InnerXml = $xml.ossec_config.syscheck.InnerXml + $snippet
+    $xml.Save($OSSEC_CONF)
+    Write-Host "[*] Snippet FIM ajouté dans $OSSEC_CONF"
+} else {
+    Write-Host "[*] Snippet FIM déjà présent, pas de modification."
+}
+
+# Restart service
+Write-Host "[*] Redémarrage du service wazuh-agent..."
+Restart-Service -Name "wazuh-agent" -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 3
+
+# Create test file
+Write-Host "[*] Création d'un fichier test et d'un fichier .encrypted sur le Desktop..."
+$desktop = Join-Path -Path $env:USERPROFILE -ChildPath 'Desktop'
+New-Item -ItemType Directory -Path $desktop -Force | Out-Null
+$testFile = Join-Path $desktop ("test" + ".txt")
+"simu_encrypted" | Out-File -FilePath $encrypted -Encoding UTF8
+
+# Show recent ossec.log tail
+$logPath = "C:\Program Files (x86)\ossec-agent\logs\ossec.log"
+Write-Host "`n[*] 10 dernières lignes de ossec.log (si dispo):"
+if (Test-Path $logPath) {
+    Get-Content $logPath -Tail 10
+} else {
+    Write-Host "[!] $logPath introuvable"
+}
+
+Write-Host "`n[*] Terminé. Vérifie le manager Wazuh (agent doit être connecté)."
+```
+
+Le script télécharge et installe le MSI officiel Wazuh (version 4.13.1).
+
+Il modifie ossec.conf pour ajouter la surveillance FIM (Desktop, Public Documents, C:\ImportantVault).
+
+Il redémarre le service Wazuh et crée un fichier test sur le Desktop :
+
+![alt text](image-38.png)
+
+Lorsqu'on retourne sur notre interface Wazuh, on sélectionne notre agent correspondant et on a bien la remontée !
+![alt text](image-36.png)
 
 
