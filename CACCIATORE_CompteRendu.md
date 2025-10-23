@@ -1,12 +1,19 @@
 **| E5 - Metz - CACCIATORE Vincent |**  
 ***avec GRECO Clément***
 
-*22 octobre 2025*
+*23 octobre 2025*
 
 # Projet CISSP IS Security Best Practices
 
 ## 📑 Table des matières
-XXXX
+#### [1. Contexte & consignes (rappel)](#sec-1)
+#### [2. Architecture déployée](#sec-2)
+#### [A. Stress test - Visualisation Netdata](#sec-a)
+#### [B. Caldera & Wazuh](#sec-b)
+#### [C. Infection Monkey](#sec-c)
+#### [D. Windows Server](#sec-d)
+#### [3. Recommandations](#sec-3)
+#### [4. Conclusion](#sec-4)
 
 ---
 
@@ -14,18 +21,19 @@ XXXX
 > **Périmètre** : lab local (VM Ubuntu Server / Docker Compose).
 
 ---
-
+<a id="sec-1"></a>
 ## 1. Contexte & consignes (rappel)
-- Déployer un lab “tout-en-un” prêt à l’emploi contenant au minimum :  
+- Déployer un lab “tout-en-un” prêt à l’emploi contenant :  
   - une instance Linux (cibles),  
   - un serveur de monitoring/observabilité,  
   - un serveur C2,  
-  - un SIEM / visualisation des logs.  
+  - un SIEM / visualisation des logs,  
+  - un Windows Server.
 - Pouvoir simuler des cyberattaques (automatiques si possible) et visualiser les traces remontées.  
 - Produire un document décrivant la démarche, étapes, commandes et captures à fournir.
 
 ---
-
+<a id="sec-2"></a>
 ## 2. Architecture déployée
 
 ### Schéma de l'infrastructure
@@ -292,7 +300,7 @@ Ce docker-compose.yml permet donc d'exécuter l'ensemble de ces services !
 ![alt text](image-25.png)
 
 ---
-
+<a id="sec-a"></a>
 ## A. **Stress test** - Visualisation Netdata
 
 #### Objectif
@@ -385,6 +393,7 @@ Des performances "normales", *windows* est en premier en consommation de RAM car
 Ce stress test valide la visibilité de l’infrastructure via Netdata et montre la montée en charge maîtrisée des conteneurs.
 
 ---
+<a id="sec-b"></a>
 ## B. **Caldera & Wazuh**
 #### Objectif
 Déployer et contrôler des agents Sandcat (HTTP et P2P) depuis Caldera afin d'émuler des TTPs et collecter traces/logs dans Wazuh et Netdata.
@@ -449,7 +458,7 @@ On voit bien les remontées d'informations directement sur notre interface :
 Les exécutions de notre opération passant par notre agent précédemment créé sont détectées !
 
 ---
-
+<a id="sec-c"></a>
 ## C. **Infection Monkey**
 #### Objectif
 Infection Monkey (Guardicore) est un simulateur d'attaques autonome. Il permet de configurer des agents, définir des cibles, et exécuter des scénarios (ex : chiffrement de fichiers) pour évaluer la résilience et la détection.
@@ -484,7 +493,7 @@ Tout a été chiffré et un *README.md* est présent, on peut observer le rappor
 ![alt text](image-32.png)
 
 ---
-
+<a id="sec-d"></a>
 ## D. **Windows Server**
 
 Via notre docker-compose.yml, nous avons déployé un Windows Server 2019 (assez rapidement) :
@@ -594,4 +603,58 @@ Il redémarre le service Wazuh et crée un fichier test sur le Desktop :
 Lorsqu'on retourne sur notre interface Wazuh, on sélectionne notre agent correspondant et on a bien la remontée !
 ![alt text](image-36.png)
 
+---
 
+<a id="sec-3"></a>
+## 3. Recommandations
+
+### 🛡️ Sécurité et durcissement des serveurs
+- **Analyser les surfaces d’exposition** et désactiver les services inutiles.  
+- **Mettre à jour régulièrement** tous les conteneurs et dépendances.  
+- **Appliquer le chiffrement TLS/SSL** à toutes les communications (Caldera, Wazuh, Netdata).  
+- **Limiter les privilèges Docker** : containers non privilégiés, `no-new-privileges`, volumes en lecture seule.  
+- **Isoler le réseau de test** du réseau hôte/production.  
+- **Contrôle d’intégrité (FIM)** activé sur les répertoires sensibles pour détecter tout changement.  
+
+### 🔍 Observabilité et corrélation
+- **Centralisation des journaux** dans Wazuh et Netdata.  
+- Création de **dashboards de détection d’anomalies** (process suspects, pics de charge).  
+- **Alerting automatique** pour les événements critiques (ransomware, élévation de privilège, connexions non autorisées).  
+- **Interopérabilité XDR/SIEM** : possibilité d’exporter les logs vers une plateforme externe (ELK, Splunk).  
+
+### ⚙️ Automatisation et industrialisation
+- **Script de déploiement complet** : génération auto des certificats, configuration Wazuh et lancement de l’infrastructure.  
+- **Variables d’environnement documentées** (`.env`) pour un redéploiement rapide.  
+- **CI/CD** (GitHub Actions/GitLab CI) pour tester et maintenir la cohérence du lab.  
+- **Snapshots** ou backups des volumes critiques (MongoDB, Wazuh Indexer, données Netdata).  
+
+### 🧩 Exploitation pédagogique et analyses
+- Création de **scénarios MITRE ATT&CK** : reconnaissance, exécution, persistance, exfiltration.  
+- Association de chaque étape à des alertes Wazuh et à des traces Netdata.  
+- **Rédaction de playbooks d’incidents** (contenu du rapport).  
+- **Analyse post-attaque** : interprétation des logs, identification de la faille, proposition de contre‑mesures.  
+
+---
+
+<a id="sec-4"></a>
+## 4. Conclusion
+
+### 🎯 Synthèse du projet
+Le projet **CISSP IS Security Best Practices** a permis de :  
+1. Déployer un **lab tout-en-un fonctionnel**,  
+2. **Simuler des attaques offensives** avec Caldera et Infection Monkey,  
+3. **Détecter, corréler et visualiser** les événements avec Wazuh (XDR/SIEM),  
+4. **Observer les impacts systèmes** via Netdata,  
+5. **Intégrer Windows Server et Linux** dans un même écosystème,  
+6. **Automatiser** le déploiement complet pour portabilité.
+
+### 💡 Enseignements majeurs
+- Approche **Purple Team** : offensive (Caldera/Monkey) + défensive (Wazuh/XDR).  
+- Vision complète de la **chaîne d’attaque → détection → remédiation**.  
+- Démonstration claire de la **valeur d’une stratégie d’adversary emulation**.  
+
+### 🚀 Perspectives
+- Ajouter un **vrai XDR commercial** pour comparaison avec Wazuh.  
+- Étendre la supervision à **Prometheus + Grafana** pour plus de métriques.  
+- Créer un **catalogue de scénarios réutilisables** (MITRE ATT&CK / Caldera).  
+- Porter le lab sur **cloud (Azure ou AWS)** pour simuler des environnements hybrides.
